@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef } from "react";
 import axios from "axios"; // 引入 axios
 
 import "./App.css";
@@ -10,6 +10,9 @@ function App() {
   const [file, setFile] = useState(null);
   const [hashProgress, setHashProgress] = useState(0);
   const [chunks, setChunks] = useState([]);
+
+  // 使用 useRef 来存储每个请求的 AbortController
+  const controllerRef = useRef({});
 
   const handleFileChange = (e) => {
     const file = e.target.files[0];
@@ -24,7 +27,6 @@ function App() {
 
     //1. 切片 chunks
     const chunks = createFileChunks(file, CHUNK_SIZE);
-    console.log("🦄  file: App.jsx:29  chunks:", chunks);
 
     //2. 计算 hash
     const hash = await calcaulateFileHash(chunks);
@@ -35,7 +37,6 @@ function App() {
     });
 
     const { shouldUpload, message, uploadedList } = data;
-    console.log("🦄  file: App.jsx:37  uploadedList:", data);
 
     if (!shouldUpload) {
       alert(message || "文件已存在，秒传成功！");
@@ -60,11 +61,15 @@ function App() {
       // 过滤掉已经上传的切片
       .filter((chunk) => !uploadedList.includes(chunk.hash))
       .map((chunk) => {
+        const controller = new AbortController();
+        controllerRef.current[chunk.hash] = controller; // 存储 controller
+
         const formData = new FormData();
         formData.append("chunk", chunk.chunk);
         formData.append("hash", fileHash); // 整个文件的 hash
         formData.append("chunkHash", chunk.hash); // 当前切片的 hash
         return axios.post(`${API_URL}/upload`, formData, {
+          signal: controller.signal, // 关联 signal
           onUploadProgress: (progressEvent) => {
             const percentCompleted = Math.round(
               (progressEvent.loaded * 100) / progressEvent.total
@@ -85,6 +90,14 @@ function App() {
 
     await Promise.all(requests);
     alert("所有切片上传完毕!");
+
+    await axios.post(`${API_URL}/merge`, {
+      fileHash: fileHash,
+      filename: file.name,
+      size: CHUNK_SIZE, // 将切片大小告诉后端
+    });
+
+    alert(`文件 "${file.name}" 上传成功!`);
   };
 
   const createFileChunks = (file, chunkSize) => {
@@ -117,12 +130,34 @@ function App() {
   };
 
   const handlePause = () => {
-    console.log("暂停上传");
+    console.log("执行暂停");
+
+    Object.values(controllerRef.current).forEach((controller) =>
+      controller.abort()
+    );
+    controllerRef.current = {}; // 清空 ref
   };
 
-  // 处理恢复逻辑（后续实现）
+  // 失败尝试连接
+  const requestRetry = async (url, data, options) => {
+    for (let i = 0; i < 5; i++) {
+      try {
+        return await axios.post(url, data, options);
+      } catch (error) {
+        if (axios.isCancel(error)) {
+          throw error;
+        }
+        console.error(`切片上传失败，正在进行第 ${i + 1} 次重试...`, error);
+        // 如果是最后一次尝试，则抛出错误
+        if (i === maxRetries - 1) {
+          throw error;
+        }
+      }
+    }
+  };
   const handleResume = () => {
     console.log("恢复上传");
+    handleUpload();
   };
 
   const totalProgress = useMemo(() => {

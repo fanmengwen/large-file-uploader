@@ -87,3 +87,43 @@ app.post("/upload", async (req, res) => {
     } catch {}
   });
 });
+
+app.post("/merge", async (req, res) => {
+  const { fileHash, filename, size } = req.body; // size 是我们前端定义的 CHUNK_SIZE
+  const finalFilePath = path.resolve(UPLOAD_DIR, filename); // 使用原始文件名
+
+  const chunkDir = path.resolve(TEMP_CHUNKS_DIR, fileHash);
+  if (!fse.existsSync(chunkDir)) {
+    return res.status(400).json({ error: "切片目录不存在" });
+  }
+  const chunkPaths = await fse.readdir(chunkDir);
+
+  // -- 核心合并逻辑 --
+  // 1. 将切片按序号排序
+  chunkPaths.sort((a, b) => {
+    const indexA = parseInt(a.split("-").pop());
+    const indexB = parseInt(b.split("-").pop());
+    return indexA - indexB;
+  });
+
+  // 2. 使用流来合并文件
+  const writeStream = fse.createWriteStream(finalFilePath);
+  for (const chunkName of chunkPaths) {
+    const chunkPath = path.resolve(chunkDir, chunkName);
+    const readStream = fse.createReadStream(chunkPath);
+    // 将读取流的数据通过管道输送到写入流
+    await new Promise((resolve, reject) => {
+      readStream.pipe(writeStream, { end: false }); // 还有其他切片要写入。
+      readStream.on("end", resolve);
+      readStream.on("error", reject);
+    });
+  }
+  writeStream.end(); // 关闭写入流，完成文件写入
+
+  // 3. 删除临时切片目录
+  await fse.remove(chunkDir);
+
+  res
+    .status(200)
+    .json({ message: "文件合并成功", url: `/uploads/${filename}` });
+});
