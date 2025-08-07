@@ -5,7 +5,8 @@
 // 浏览器会加载并执行 some-script.js 这个文件，但它是在一个全新的、与主页面完全隔离的后台线程中运行
 self.importScripts("/spark-md5.min.js");
 
-// 计算文件的 MD5 值
+// 计算文件的 MD5 值， 监听来自主线程的消息
+// self ≈ globalThis（全局作用域）
 self.onmessage = (e) => {
   const { chunks } = e.data;
   const spark = new SparkMD5.ArrayBuffer();
