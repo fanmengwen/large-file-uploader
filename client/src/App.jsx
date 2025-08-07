@@ -57,38 +57,46 @@ function App() {
   };
 
   const uploadChunks = async (chunksToUpload, fileHash, uploadedList) => {
-    const requests = chunksToUpload
+    const allChunks = chunksToUpload
       // 过滤掉已经上传的切片
-      .filter((chunk) => !uploadedList.includes(chunk.hash))
-      .map((chunk) => {
-        const controller = new AbortController();
-        controllerRef.current[chunk.hash] = controller; // 存储 controller
+      .filter((chunk) => !uploadedList.includes(chunk.hash));
 
-        const formData = new FormData();
-        formData.append("chunk", chunk.chunk);
-        formData.append("hash", fileHash); // 整个文件的 hash
-        formData.append("chunkHash", chunk.hash); // 当前切片的 hash
-        return axios.post(`${API_URL}/upload`, formData, {
-          signal: controller.signal, // 关联 signal
-          onUploadProgress: (progressEvent) => {
-            const percentCompleted = Math.round(
-              (progressEvent.loaded * 100) / progressEvent.total
-            );
+    const queue = [...allChunks];
 
-            // 更新对应切片的进度
-            setChunks((prevChunks) => {
-              return prevChunks.map((c) => {
-                if (c.hash === chunk.hash) {
-                  return { ...c, progress: percentCompleted };
-                }
-                return c;
-              });
+    const uploadLoad = async () => {
+      if (queue.length === 0) {
+        return;
+      }
+      const chunk = queue.shift();
+      const controller = new AbortController();
+      controllerRef.current[chunk.hash] = controller; // 存储 controller
+
+      const formData = new FormData();
+      formData.append("chunk", chunk.chunk);
+      formData.append("hash", fileHash); // 整个文件的 hash
+      formData.append("chunkHash", chunk.hash); // 当前切片的 hash
+      return axios.post(`${API_URL}/upload`, formData, {
+        signal: controller.signal, // 关联 signal
+        onUploadProgress: (progressEvent) => {
+          const percentCompleted = Math.round(
+            (progressEvent.loaded * 100) / progressEvent.total
+          );
+
+          // 更新对应切片的进度
+          setChunks((prevChunks) => {
+            return prevChunks.map((c) => {
+              if (c.hash === chunk.hash) {
+                return { ...c, progress: percentCompleted };
+              }
+              return c;
             });
-          },
-        });
+          });
+        },
       });
+    };
+    const workers = Array.from({ length: 5 }, () => uploadLoad());
 
-    await Promise.all(requests);
+    await Promise.all(workers);
     alert("所有切片上传完毕!");
 
     await axios.post(`${API_URL}/merge`, {
@@ -173,30 +181,30 @@ function App() {
 
   return (
     <>
-      <div className='app-container'>
+      <div className="app-container">
         <h1>Node.js + React 大文件上传</h1>
-        <div className='progress-container'>
+        <div className="progress-container">
           <h2>Hash 计算进度</h2>
-          <progress value={hashProgress} max='100'></progress>
+          <progress value={hashProgress} max="100"></progress>
         </div>
-        <div className='input-container'>
-          <input type='file' onChange={handleFileChange} />
+        <div className="input-container">
+          <input type="file" onChange={handleFileChange} />
           <button onClick={handleUpload}>上传</button>
           <button onClick={handlePause}>暂停</button>
           <button onClick={handleResume}>恢复</button>
         </div>
-        <div className='progress-container'>
+        <div className="progress-container">
           <h2>总进度: {totalProgress}%</h2>
-          <progress value={totalProgress} max='100'></progress>
+          <progress value={totalProgress} max="100"></progress>
         </div>
-        <div className='chunks-container'>
+        <div className="chunks-container">
           <h2>切片上传进度</h2>
-          <div className='chunks-grid'>
+          <div className="chunks-grid">
             {chunks.map((chunk) => (
-              <div key={chunk.hash} className='chunk-item'>
-                <div className='chunk-label'>{chunk.hash.slice(-6)}</div>
-                <progress value={chunk.progress} max='100'></progress>
-                <span className='chunk-percent'>{chunk.progress}%</span>
+              <div key={chunk.hash} className="chunk-item">
+                <div className="chunk-label">{chunk.hash.slice(-6)}</div>
+                <progress value={chunk.progress} max="100"></progress>
+                <span className="chunk-percent">{chunk.progress}%</span>
               </div>
             ))}
           </div>
